@@ -1,14 +1,26 @@
 import { PacketType } from '../lib/constants';
-import { unpack } from '../lib/packet';
+import { unpack, validatePacket } from '../lib/packet';
 import { createLogger } from '../lib/logger';
 import type { TelemetryRecord } from '../lib/telemetry';
+import { getDeviceBySerial, updateDeviceLastBroadcast } from '../workers/dbWriter';
 
 const log = createLogger('packet-worker');
 
-export function handlePacketMessage(message: Uint8Array, emit: (payload: unknown) => void) {
+export async function handlePacketMessage(message: Uint8Array, emit: (payload: unknown) => void) {
   try {
     const packet = unpack(message);
-    if (packet && packet.valid && packet.type === PacketType.SENSOR) {
+    if (packet && packet.valid && packet.type === PacketType.SENSOR && validatePacket(packet)) {
+      const serial = packet.serial;
+
+      const device = await getDeviceBySerial(serial);
+      if (!device) {
+        emit({ action: 'error', error: `unregistered device ${serial}`, serial });
+        return;
+      }
+
+      // update last broadcast timestamp (best-effort)
+      void updateDeviceLastBroadcast(serial, new Date());
+
       const record: TelemetryRecord = {
         deviceId: packet.serial,
         timestamp: new Date(),
@@ -16,6 +28,10 @@ export function handlePacketMessage(message: Uint8Array, emit: (payload: unknown
         humidity: packet.humidity,
         airPressure: packet.airPressure
       };
+          if (device.location && Array.isArray(device.location.coordinates)) {
+            const [lon, lat] = device.location.coordinates;
+            record.location = { lat, lon };
+          }
       emit({ action: 'record', record });
     }
   } catch (error) {

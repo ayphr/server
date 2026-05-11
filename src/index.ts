@@ -5,6 +5,7 @@ import { closeTelemetryBuffer, drainTelemetryBuffer, enqueueTelemetryRecord } fr
 import { appendChunk, parseIncomingBuffer } from './lib/socketFraming';
 import type { TelemetryRecord } from './lib/telemetry';
 import { createWorkerPool } from './lib/workerPool';
+import { setupServer } from './api/server';
 
 const log = createLogger('server');
 const WORKER_COUNT = 4;
@@ -39,7 +40,7 @@ setInterval(() => {
   })();
 }, FLUSH_INTERVAL_MS);
 
-const server = net.createServer((socket) => {
+const tcpServer = net.createServer((socket) => {
   let buffer: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
 
   socket.on('data', (chunk: Uint8Array<ArrayBufferLike>) => {
@@ -55,14 +56,21 @@ const server = net.createServer((socket) => {
   socket.on('error', (error) => log.error({ error }, 'socket error'));
 });
 
-const PORT = Number(process.env.PORT || 4000);
-server.listen(PORT, () => log.info({ port: PORT }, 'TCP server listening'));
+const TCP_PORT = Number(process.env.TCP_PORT || 4000);
+const API_PORT = Number(process.env.API_PORT || 8080);
+
+tcpServer.listen(TCP_PORT, () => log.info({ port: TCP_PORT }, 'TCP server listening'));
+const httpServer = setupServer(API_PORT, () => log.info({ port: API_PORT }, 'API (HTTP) server listening'));
 
 process.once('SIGINT', async () => {
   log.info('shutting down');
-  server.close();
+
+  tcpServer.close();
+  await httpServer.stop();
+
   await workerPool.shutdown();
   await closeTelemetryBuffer();
   await dbWorker.terminate();
+
   process.exit(0);
 });

@@ -51,6 +51,11 @@ export function validatePacket(packet: SensorPacket): void {
   }
 }
 
+/**
+ * Counts the number of set bits (1s) in a bigint value, used for parity checking.
+ * @param value The bigint value to count bits in
+ * @returns The number of set bits in the value
+ */
 function countBits(value: bigint): number {
   let count = 0;
   for (let current = value; current !== 0n; current &= current - 1n) count++;

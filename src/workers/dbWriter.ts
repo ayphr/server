@@ -1,36 +1,137 @@
-import { MongoClient } from 'mongodb';
+import { Collection, Db, MongoClient, type Document } from 'mongodb';
 import { createLogger } from '../lib/logger';
 import type { TelemetryRecord } from '../lib/telemetry';
+import { serialiseUser, unserialiseUser, type SerialisedUser, type User, type UserRole } from '../api/types/user';
+import { serialiseDevice, unserialiseDevice, type Device, type SerialisedDevice } from '../api/types/device';
+import { serialisePunishment, unserialisePunishment, type Punishment, type SerialisedPunishment } from '../api/types/punishment';
 
 const log = createLogger('db-worker');
 
 const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 const DB_NAME = process.env.MONGO_DB || 'nimbus';
-const COLLECTION = process.env.MONGO_COLLECTION || 'telemetry';
+
+const TELEMETRY_COLLECTION = 'telemetry';
+const USERS_COLLECTION = 'users';
+const PUNISHMENTS_COLLECTION = 'punishments';
+const DEVICES_COLLECTION = 'devices';
 
 let client: MongoClient | null = null;
-let collection: any = null;
+let database: Db | null = null;
+
+let telemetryCollection: Collection<Document> | null = null;
+let usersCollection: Collection<Document> | null = null;
+let punishmentsCollection: Collection<Document> | null = null;
+let devicesCollection: Collection<Document> | null = null;
+
+async function createCollections() {
+  if (database == null) return;
+
+  const collections = await database.collections();
+  const collectionsToCreate: {
+    name: string;
+    creator: Function;
+  }[] = [
+      {
+        name: TELEMETRY_COLLECTION,
+        creator: async (database: Db) => {
+          await database.createCollection(TELEMETRY_COLLECTION, {
+            timeseries: { timeField: 'timestamp', metaField: 'deviceId', granularity: 'seconds' }
+          });
+          // ensure index on deviceId for queries
+          const col = database.collection(TELEMETRY_COLLECTION);
+          await col.createIndex({ deviceId: 1 });
+          // geo index for telemetry location
+          try {
+            await col.createIndex({ location: '2dsphere' });
+          } catch (e) {
+            // ignore if not supported
+          }
+        }
+      },
+      {
+        name: USERS_COLLECTION,
+        creator: async (database: Db) => {
+          const collection = await database.createCollection(USERS_COLLECTION);
+
+          // Setup indexes
+          await collection.createIndex({ uuid: 1 }, { unique: true });
+          await collection.createIndex({ username: 1 }, { unique: true });
+          await collection.createIndex({ 'auth.token': 1 });
+
+          return collection;
+        }
+      },
+      {
+        name: PUNISHMENTS_COLLECTION,
+        creator: async (database: Db) => {
+          const collection = await database.createCollection(PUNISHMENTS_COLLECTION);
+
+          await collection.createIndex({ userUuid: 1 });
+          await collection.createIndex({ type: 1, endsAt: 1, liftedAt: 1 });
+
+          return collection;
+        }
+      },
+      {
+        name: DEVICES_COLLECTION,
+        creator: async (database: Db) => {
+          const collection = await database.createCollection(DEVICES_COLLECTION);
+
+          await collection.createIndex({ serial: 1 }, { unique: true });
+          await collection.createIndex({ ownerUuid: 1 });
+          
+          // geo index for location
+          try {
+            await collection.createIndex({ location: '2dsphere' });
+          } catch (e) {
+            // ignore if server doesn't support 2dsphere
+          }
+
+          return collection;
+        }
+      },
+      {
+        name: 'purchases',
+        creator: async (database: Db) => {
+          const collection = await database.createCollection('purchases');
+          await collection.createIndex({ buyerUuid: 1 });
+          await collection.createIndex({ createdAt: -1 });
+          return collection;
+        }
+      }
+    ];
+
+  collectionsToCreate.forEach(async (collection: {
+    name: string;
+    creator: Function;
+  }) => {
+    if (collections.find((mongoCollection: Collection<Document>) => {
+      return mongoCollection.collectionName == collection.name
+    })) return;
+
+    try {
+      await collection.creator(database);
+      log.info({ collection: collection.name }, 'created collection');
+    } catch (error) {
+      log.warn({ error, collection: collection.name }, 'could not create collection');
+    }
+  });
+}
 
 async function connect() {
   if (client) return;
 
   client = new MongoClient(MONGO_URI);
   await client.connect();
-  const database = client.db(DB_NAME);
-  const collections = await database.listCollections({ name: COLLECTION }).toArray();
 
-  if (collections.length === 0) {
-    try {
-      await database.createCollection(COLLECTION, {
-        timeseries: { timeField: 'timestamp', metaField: 'deviceId', granularity: 'seconds' }
-      });
-      log.info({ collection: COLLECTION }, 'created time-series collection');
-    } catch (error) {
-      log.warn({ error, collection: COLLECTION }, 'could not create collection');
-    }
-  }
+  database = client.db(DB_NAME);
 
-  collection = database.collection(COLLECTION);
+  await createCollections();
+
+  telemetryCollection = database.collection(TELEMETRY_COLLECTION);
+  usersCollection = database.collection(USERS_COLLECTION);
+  punishmentsCollection = database.collection(PUNISHMENTS_COLLECTION);
+  devicesCollection = database.collection(DEVICES_COLLECTION);
 }
 
 export async function flushRecords(records: TelemetryRecord[], emit: (payload: unknown) => void) {
@@ -43,10 +144,275 @@ export async function flushRecords(records: TelemetryRecord[], emit: (payload: u
       return;
     }
 
-    const result = await collection.insertMany(documents);
+    if (telemetryCollection == null) {
+      emit({ action: 'log', msg: 'database not init' });
+      return;
+    }
+
+    const result = await telemetryCollection.insertMany(documents);
     emit({ action: 'log', msg: `inserted ${result.insertedCount} documents` });
+    // Award credits to owners: small credit per record
+    try {
+      const CREDIT_PER_RECORD = Number(process.env.CREDIT_PER_RECORD) || 0.01;
+      const countsByDevice: Record<number, number> = {};
+      for (const doc of documents) {
+        const id = (doc as any).deviceId as number;
+        countsByDevice[id] = (countsByDevice[id] || 0) + 1;
+      }
+
+      const ownerCredits: Record<string, number> = {};
+      for (const [deviceIdStr, count] of Object.entries(countsByDevice)) {
+        const deviceId = Number(deviceIdStr);
+        const dev = await getDeviceBySerial(deviceId);
+        if (!dev) continue;
+        const owner = dev.ownerUuid;
+        ownerCredits[owner] = (ownerCredits[owner] || 0) + (CREDIT_PER_RECORD * count);
+      }
+
+      // apply credits to users
+      for (const [ownerUuid, amount] of Object.entries(ownerCredits)) {
+        if (!usersCollection) continue;
+        await usersCollection.updateOne({ uuid: ownerUuid }, { $inc: { credits: amount } });
+      }
+    } catch (e) {
+      log.warn({ error: e }, 'failed to award credits after telemetry insert');
+    }
   } catch (error) {
     log.error({ error }, 'failed to flush records');
     emit({ action: 'error', error: String(error) });
+  }
+}
+
+export async function createUser(user: User) {
+  if (usersCollection == null) return;
+
+  await usersCollection.insertOne(serialiseUser(user));
+  return user;
+}
+
+export async function getUserFromUuid(uuid: string) {
+  if (usersCollection == null) return;
+
+  const doc = await usersCollection.findOne({ uuid });
+  if (!doc) return null;
+
+  return unserialiseUser(doc as unknown as SerialisedUser);
+}
+
+export async function getUserFromUsername(username: string) {
+  if (usersCollection == null) return;
+
+  const doc = await usersCollection.findOne({ username });
+  if (!doc) return null;
+
+  return unserialiseUser(doc as unknown as SerialisedUser);
+}
+
+export async function getUserFromToken(token: string) {
+  if (usersCollection == null) return;
+
+  const doc = await usersCollection.findOne({ 'auth.token': token });
+  if (!doc) return null;
+
+  return unserialiseUser(doc as unknown as SerialisedUser);
+}
+
+export async function getUsers() {
+  if (usersCollection == null) return [];
+
+  const docs = await usersCollection.find({}).sort({ createdAt: -1 }).toArray();
+  return docs.map((doc) => unserialiseUser(doc as unknown as SerialisedUser));
+}
+
+export async function getUsersByRole(role: UserRole) {
+  if (usersCollection == null) return [];
+
+  const docs = await usersCollection.find({ role }).sort({ createdAt: -1 }).toArray();
+  return docs.map((doc) => unserialiseUser(doc as unknown as SerialisedUser));
+}
+
+export async function getUserCount() {
+  if (usersCollection == null) return 0;
+
+  return usersCollection.countDocuments({});
+}
+
+export async function updateUser(user: User) {
+  if (usersCollection == null) return;
+
+  await usersCollection.updateOne({ uuid: user.uuid }, { $set: serialiseUser(user) });
+  return user;
+}
+
+export async function updateUserRole(userUuid: string, role: UserRole) {
+  const user = await getUserFromUuid(userUuid);
+  if (!user) return null;
+
+  user.role = role;
+  user.isStaff = role !== 'user';
+  await updateUser(user);
+  return user;
+}
+
+export async function createPunishment(punishment: Punishment) {
+  if (punishmentsCollection == null) return;
+
+  await punishmentsCollection.insertOne(serialisePunishment(punishment));
+  return punishment;
+}
+
+export async function getPunishmentById(id: string) {
+  if (punishmentsCollection == null) return;
+
+  const doc = await punishmentsCollection.findOne({ id });
+  if (!doc) return null;
+
+  return unserialisePunishment(doc as unknown as SerialisedPunishment);
+}
+
+export async function getPunishmentsForUserUuid(userUuid: string) {
+  if (punishmentsCollection == null) return [];
+
+  const docs = await punishmentsCollection.find({ userUuid }).sort({ issuedAt: -1 }).toArray();
+  return docs.map((doc) => unserialisePunishment(doc as unknown as SerialisedPunishment));
+}
+
+export async function getActiveSuspensionForUserUuid(userUuid: string) {
+  if (punishmentsCollection == null) return;
+
+  const now = new Date().toISOString();
+  const doc = await punishmentsCollection.findOne({
+    userUuid,
+    type: 'suspension',
+    liftedAt: { $exists: false },
+    startsAt: { $lte: now },
+    endsAt: { $gt: now },
+  });
+
+  if (!doc) return null;
+
+  return unserialisePunishment(doc as unknown as SerialisedPunishment);
+}
+
+export async function getPunishmentsByType(type: Punishment['type']) {
+  if (punishmentsCollection == null) return [];
+
+  const docs = await punishmentsCollection.find({ type }).sort({ issuedAt: -1 }).toArray();
+  return docs.map((doc) => unserialisePunishment(doc as unknown as SerialisedPunishment));
+}
+
+export async function updatePunishment(punishment: Punishment) {
+  if (punishmentsCollection == null) return;
+
+  await punishmentsCollection.updateOne({ id: punishment.id }, { $set: serialisePunishment(punishment) });
+  return punishment;
+}
+
+// Devices helpers
+export async function createDevice(device: Device) {
+  if (devicesCollection == null) return;
+
+  await devicesCollection.insertOne(serialiseDevice(device));
+  return device;
+}
+
+export async function getDeviceBySerial(serial: number) {
+  if (devicesCollection == null) return null;
+
+  const doc = await devicesCollection.findOne({ serial });
+  if (!doc) return null;
+
+  return unserialiseDevice(doc as unknown as SerialisedDevice);
+}
+
+export async function updateDevice(device: Device) {
+  if (devicesCollection == null) return;
+
+  await devicesCollection.updateOne({ serial: device.serial }, { $set: serialiseDevice(device) });
+  return device;
+}
+
+export async function getDevicesForOwnerUuid(ownerUuid: string) {
+  if (devicesCollection == null) return [];
+
+  const docs = await devicesCollection.find({ ownerUuid }).sort({ registeredAt: -1 }).toArray();
+  return docs.map((doc) => unserialiseDevice(doc as unknown as SerialisedDevice));
+}
+
+export async function updateDeviceLastBroadcast(serial: number, when: Date) {
+  if (devicesCollection == null) return;
+
+  await devicesCollection.updateOne({ serial }, { $set: { lastBroadcastedAt: when.toISOString() } });
+}
+
+export async function getTelemetryByLocationAndTime(center: { lat: number; lon: number }, radiusMeters: number, start?: Date | string, end?: Date | string, limit = 100, skip = 0) {
+  if (telemetryCollection == null) return { total: 0, records: [] };
+
+  const startDate = start ? new Date(start) : new Date(0);
+  const endDate = end ? new Date(end) : new Date();
+
+  const metersToRadians = (m: number) => m / 6378137;
+  const query: any = {
+    timestamp: { $gte: startDate, $lte: endDate },
+    location: {
+      $geoWithin: {
+        $centerSphere: [[center.lon, center.lat], metersToRadians(radiusMeters)]
+      }
+    }
+  };
+
+  const total = await telemetryCollection.countDocuments(query);
+  const docs = await telemetryCollection.find(query).sort({ timestamp: -1 }).skip(skip).limit(limit).toArray();
+  return { total, records: docs };
+}
+
+export async function chargeUserCredits(userUuid: string, amount: number) {
+  if (usersCollection == null) return false;
+  const user = await usersCollection.findOne({ uuid: userUuid });
+  if (!user) return false;
+  const current = (user.credits || 0) as number;
+  if (current < amount) return false;
+  await usersCollection.updateOne({ uuid: userUuid }, { $inc: { credits: -amount } });
+  return true;
+}
+
+export async function awardCreditsBulk(awards: Record<string, number>) {
+  if (usersCollection == null) return;
+  for (const [uuid, amount] of Object.entries(awards)) {
+    await usersCollection.updateOne({ uuid }, { $inc: { credits: amount } });
+  }
+}
+
+export async function performPurchaseTransaction(buyerUuid: string, debitAmount: number, ownerAwards: Record<string, number>) {
+  await connect();
+  if (!client || !usersCollection || !database) return false;
+
+  const session = client.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const buyer = await usersCollection!.findOne({ uuid: buyerUuid }, { session });
+      if (!buyer) throw new Error('BUYER_NOT_FOUND');
+      const balance = (buyer.credits || 0) as number;
+      if (balance < debitAmount) throw new Error('INSUFFICIENT_FUNDS');
+
+      // debit buyer
+      await usersCollection!.updateOne({ uuid: buyerUuid }, { $inc: { credits: -debitAmount } }, { session });
+
+      // credit owners
+      for (const [ownerUuid, amount] of Object.entries(ownerAwards)) {
+        await usersCollection!.updateOne({ uuid: ownerUuid }, { $inc: { credits: amount } }, { session });
+      }
+
+      // record purchase
+      const purchases = database!.collection('purchases');
+      await purchases.insertOne({ buyerUuid, debitAmount, ownerAwards, createdAt: new Date() }, { session });
+    });
+    return true;
+  } catch (e) {
+    if ((e as Error).message === 'INSUFFICIENT_FUNDS') return false;
+    log.warn({ error: e }, 'transaction failed');
+    return false;
+  } finally {
+    await session.endSession();
   }
 }

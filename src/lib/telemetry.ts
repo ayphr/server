@@ -4,4 +4,5 @@ export type TelemetryRecord = {
   temperature: number;
   humidity: number;
   airPressure: number;
+  location?: { lat: number; lon: number };
 };
