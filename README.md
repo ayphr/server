@@ -1,6 +1,6 @@
-# Nimbus Server
+# Caelus Server
 
-Backend service for Nimbus, built with TypeScript and Bun.
+Backend service for Caelus, built with TypeScript and Bun.
 
 ## Prerequisites
 

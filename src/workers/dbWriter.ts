@@ -7,7 +7,7 @@ import { CREDIT_PER_RECORD } from '../constants';
 const log = createLogger('db-worker');
 
 const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
-const DB_NAME = process.env.MONGO_DB || 'nimbus';
+const DB_NAME = process.env.MONGO_DB || 'caelus';
 
 const TELEMETRY_COLLECTION = 'telemetry';
 const USERS_COLLECTION = 'users';

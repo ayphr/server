@@ -7,7 +7,7 @@ const enableStructured = process.env.NODE_ENV === 'production';
 export const logger = pino({
   level,
   base: {
-    service: 'nimbus-server'
+    service: 'caelus-server'
   },
   timestamp: pino.stdTimeFunctions.isoTime,
   enabled: enableStructured
