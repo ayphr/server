@@ -1,6 +1,6 @@
 import { requireAuth } from "../auth";
 import { getPunishmentById, getPunishmentsForUserUuid } from "../../workers/dbWriter";
-import type { User } from "../types/user";
+import type { User } from "../../../../common";
 import { handleApiNotFoundRoute } from "./util";
 
 function json(body: unknown, status = 200) {

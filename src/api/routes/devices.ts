@@ -1,7 +1,6 @@
 import { requireAuth } from "../auth";
 import { createDevice, getDeviceBySerial, getDevicesForOwnerUuid } from "../../workers/dbWriter";
-import type { Device } from "../types/device";
-import type { User } from "../types/user";
+import type { Device, User } from "../../../../common";
 import { handleApiNotFoundRoute } from "./util";
 
 function json(body: unknown, status = 200) {
@@ -28,24 +27,28 @@ const handleRegister = requireAuth(async (request, user: User) => {
   const existing = await getDeviceBySerial(serial);
   if (existing) return json({ error: 'serial already registered' }, 409);
 
+  // location: { lat, lon }
+  let location: Device['location'] | null = null;
+  if (body?.location && typeof body.location === 'object') {
+    const lat = Number((body.location as any).lat);
+    const lon = Number((body.location as any).lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+      location = { type: 'Point', coordinates: [lon, lat] };
+    } else {
+      return json({ error: 'invalid location' }, 400);
+    }
+  }
+
+  if (location == null) return json({ error: 'invalid location' }, 400);
+
   const now = new Date();
   const device: Device = {
     serial,
     ownerUuid: user.uuid,
     ownerUsername: user.username,
     registeredAt: now,
+    location
   };
-  
-  // location: { lat, lon }
-  if (body?.location && typeof body.location === 'object') {
-    const lat = Number((body.location as any).lat);
-    const lon = Number((body.location as any).lon);
-    if (Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
-      device.location = { type: 'Point', coordinates: [lon, lat] };
-    } else {
-      return json({ error: 'invalid location' }, 400);
-    }
-  }
 
   await createDevice(device);
 
@@ -67,26 +70,24 @@ const handleGetBySerial = requireAuth(async (request, user: User) => {
   if (!device) return json({ error: 'not found' }, 404);
 
   if (device.ownerUuid !== user.uuid) return json({ error: 'forbidden' }, 403);
-    // location is required: { lat, lon }
-    if (!body?.location || typeof body.location !== 'object') {
-      return json({ error: 'location is required' }, 400);
-    }
 
-    const lat = Number((body.location as any).lat);
-    const lon = Number((body.location as any).lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
-      return json({ error: 'invalid location' }, 400);
-    }
+  return json({ device });
+});
 
-    const device: Device = {
-      serial,
-      ownerUuid: user.uuid,
-      ownerUsername: user.username,
-      registeredAt: now,
-      location: { type: 'Point', coordinates: [lon, lat] },
-    };
+export function handleDevicesRoute(request: Request) {
+  const url = new URL(request.url);
+
+  if (request.method === 'POST' && (url.pathname === '/api/devices' || url.pathname === '/api/devices/register')) {
+    return handleRegister(request);
+  }
+
+  if (request.method === 'GET' && (url.pathname === '/api/devices' || url.pathname === '/api/devices/mine')) {
+    return handleListMine(request);
+  }
+
+  if (request.method === 'GET' && url.pathname.startsWith('/api/devices/') && url.pathname !== '/api/devices/mine' && url.pathname !== '/api/devices/register') {
     return handleGetBySerial(request);
   }
 
   return handleApiNotFoundRoute();
-});
+}

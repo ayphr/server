@@ -1,6 +1,6 @@
 import { requireAuth, requireRole } from "../auth";
 import { getActiveSuspensionForUserUuid, getUserFromUuid, updateUser } from "../../workers/dbWriter";
-import type { User } from "../types/user";
+import type { User } from "../../../../common";
 import { handleApiNotFoundRoute } from "./util";
 
 function json(body: unknown, status = 200) {
@@ -72,12 +72,4 @@ export function handleUsersRoute(request: Request) {
   }
 
   return handleApiNotFoundRoute();
-}export function handleUsersRoute(request: Request) {
-  const url = new URL(request.url);
-
-  if (request.method === "GET" && url.pathname.startsWith("/users/")) {
-    return new Response(`Hello User ${url.pathname.slice("/users/".length)}!`);
-  }
-
-  return new Response("Not Found", { status: 404 });
 }

@@ -18,7 +18,6 @@ export async function handlePacketMessage(message: Uint8Array, emit: (payload: u
         return;
       }
 
-      // update last broadcast timestamp (best-effort)
       void updateDeviceLastBroadcast(serial, new Date());
 
       const record: TelemetryRecord = {

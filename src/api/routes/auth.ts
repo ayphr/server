@@ -1,6 +1,6 @@
 import { clearToken, createPasswordHash, issueToken, requireAuth, verifyPassword } from "../auth";
 import { createUser, getActiveSuspensionForUserUuid, getUserCount, getUserFromUsername, updateUser } from "../../workers/dbWriter";
-import type { User } from "../types/user";
+import type { User } from "../../../../common";
 import { handleApiNotFoundRoute } from "./util";
 
 type AuthPayload = {
@@ -46,13 +46,12 @@ async function handleRegister(request: Request) {
   const user: User = {
     uuid: crypto.randomUUID(),
     username: body.username,
-    role: (await getUserCount()) === 0 ? "owner" : "user",
+    role: "user",
     auth: {
       passwordHash: createPasswordHash(body.password),
     },
     createdAt: now,
     lastActive: now,
-    isStaff: false,
     country: body.country,
   };
 

@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { requireRole } from "../auth";
-import { createPunishment, getPunishmentById, getPunishmentsByType, getUserFromUsername, getUserFromUuid, getUsers, updatePunishment } from "../../workers/dbWriter";
-import type { Punishment } from "../types/punishment";
-import type { User } from "../types/user";
+import { createPunishment, getPunishmentById, getPunishmentsByType, getUserCount, getUserFromUsername, getUserFromUuid, getUsers, getUsersByRole, updatePunishment, updateUserRole } from "../../workers/dbWriter";
+import type { Punishment, User, UserRole } from "../../../../common";
 import { handleApiNotFoundRoute } from "./util";
 
 function json(body: unknown, status = 200) {
@@ -26,6 +25,20 @@ async function readJsonBody(request: Request): Promise<Record<string, unknown> |
   }
 }
 
+const handleUsersSummary = requireRole("staff", async () => {
+  const [users, staffUsers, ownerUsers] = await Promise.all([
+    getUserCount(),
+    getUsersByRole("staff"),
+    getUsersByRole("owner"),
+  ]);
+
+  return json({
+    userCount: users,
+    staffCount: staffUsers.length,
+    ownerCount: ownerUsers.length,
+  });
+});
+
 const handleStaffUsers = requireRole("staff", async () => {
   const users = await getUsers();
   return json({ users: users.map(publicUser) });
@@ -40,7 +53,7 @@ const handleStaffPunishments = requireRole("staff", async (request, staffUser) =
   }
 
   if (request.method === "POST" && url.pathname.startsWith("/api/staff/punishments/") && url.pathname.endsWith("/lift")) {
-    const punishmentId = url.pathname.split("/")[4];
+    const punishmentId = url.pathname.split("/")[4] as string;
     const punishment = await getPunishmentById(punishmentId);
     if (!punishment) {
       return json({ error: "punishment not found" }, 404);
@@ -100,11 +113,58 @@ const handleStaffPunishments = requireRole("staff", async (request, staffUser) =
   return handleApiNotFoundRoute();
 });
 
+const handleStaffRoleUpdate = requireRole("owner", async (request) => {
+  const url = new URL(request.url);
+  const targetUuid = url.pathname.split("/")[4];
+
+  if (!targetUuid) {
+    return json({ error: "user uuid is required" }, 400);
+  }
+
+  let body: { role?: UserRole } | null = null;
+  try {
+    body = await request.json() as { role?: UserRole };
+  } catch {
+    body = null;
+  }
+
+  if (!body?.role || !["user", "staff", "owner"].includes(body.role)) {
+    return json({ error: "role must be user, staff, or owner" }, 400);
+  }
+
+  const targetUser = await getUserFromUuid(targetUuid);
+  if (!targetUser) {
+    return json({ error: "user not found" }, 404);
+  }
+
+  if (targetUser.role === "owner" && body.role !== "owner") {
+    const ownerUsers = await getUsersByRole("owner");
+    if (ownerUsers.length <= 1) {
+      return json({ error: "cannot remove the last owner" }, 409);
+    }
+  }
+
+  const updatedUser = await updateUserRole(targetUuid, body.role);
+  if (!updatedUser) {
+    return json({ error: "user not found" }, 404);
+  }
+
+  return json({ user: updatedUser });
+});
+
 export function handleStaffRoute(request: Request) {
   const url = new URL(request.url);
 
+  if (request.method === "GET" && url.pathname === "/api/staff/summary") {
+    return handleUsersSummary(request);
+  }
+
   if (request.method === "GET" && url.pathname === "/api/staff/users") {
     return handleStaffUsers(request);
+  }
+
+  if (request.method === "POST" && url.pathname.startsWith("/api/staff/role/")) {
+    return handleStaffRoleUpdate(request);
   }
 
   if ((request.method === "GET" || request.method === "POST") && url.pathname.startsWith("/api/staff/punishments")) {

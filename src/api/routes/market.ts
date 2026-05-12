@@ -1,7 +1,7 @@
 import { requireAuth } from "../auth";
 import { getTelemetryByLocationAndTime, performPurchaseTransaction } from "../../workers/dbWriter";
 import { getDeviceBySerial } from "../../workers/dbWriter";
-import type { User } from "../types/user";
+import type { User } from "../../../../common";
 
 function json(body: unknown, status = 200) {
   return Response.json(body, { status });

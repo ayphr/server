@@ -1,6 +1,5 @@
 import { handleAuthRoute } from "./routes/auth";
 import { handleApiNotFoundRoute, handleNotFoundRoute, handleStatusRoute } from "./routes/util";
-import { handleOwnerRoute } from "./routes/owner";
 import { handlePunishmentsRoute } from "./routes/punishments";
 import { handleStaffRoute } from "./routes/staff";
 import { handleDevicesRoute } from "./routes/devices";
@@ -26,10 +25,6 @@ export function routeRequest(request: Request) {
     return handleStaffRoute(request);
   }
 
-  if (url.pathname.startsWith("/api/owner/")) {
-    return handleOwnerRoute(request);
-  }
-
   if (url.pathname.startsWith('/api/devices')) {
     return handleDevicesRoute(request);
   }
@@ -38,7 +33,7 @@ export function routeRequest(request: Request) {
     return handleMarketRoute(request);
   }
 
-  if (url.pathname.startsWith("/users/")) {
+  if (url.pathname.startsWith("/api/users/")) {
     return handleUsersRoute(request);
   }
 

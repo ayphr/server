@@ -1,9 +1,7 @@
 import { Collection, Db, MongoClient, type Document } from 'mongodb';
 import { createLogger } from '../lib/logger';
 import type { TelemetryRecord } from '../lib/telemetry';
-import { serialiseUser, unserialiseUser, type SerialisedUser, type User, type UserRole } from '../api/types/user';
-import { serialiseDevice, unserialiseDevice, type Device, type SerialisedDevice } from '../api/types/device';
-import { serialisePunishment, unserialisePunishment, type Punishment, type SerialisedPunishment } from '../api/types/punishment';
+import { deserializeDate, serialiseDevice, serialisePunishment, serialiseUser, unserialiseDevice, unserialisePunishment, unserialiseUser, type Device, type Punishment, type SerialisedDevice, type SerialisedPunishment, type SerialisedUser, type User, type UserRole } from '../../../common';
 
 const log = createLogger('db-worker');
 
@@ -79,7 +77,7 @@ async function createCollections() {
 
           await collection.createIndex({ serial: 1 }, { unique: true });
           await collection.createIndex({ ownerUuid: 1 });
-          
+
           // geo index for location
           try {
             await collection.createIndex({ location: '2dsphere' });
@@ -137,7 +135,7 @@ async function connect() {
 export async function flushRecords(records: TelemetryRecord[], emit: (payload: unknown) => void) {
   try {
     await connect();
-    const documents = records.map((record) => ({ ...record, timestamp: new Date(record.timestamp) }));
+    const documents = records.map((record) => ({ ...record, timestamp: deserializeDate(record.timestamp) }));
 
     if (documents.length === 0) {
       emit({ action: 'log', msg: 'nothing to insert' });
@@ -249,7 +247,6 @@ export async function updateUserRole(userUuid: string, role: UserRole) {
   if (!user) return null;
 
   user.role = role;
-  user.isStaff = role !== 'user';
   await updateUser(user);
   return user;
 }
@@ -348,8 +345,8 @@ export async function updateDeviceLastBroadcast(serial: number, when: Date) {
 export async function getTelemetryByLocationAndTime(center: { lat: number; lon: number }, radiusMeters: number, start?: Date | string, end?: Date | string, limit = 100, skip = 0) {
   if (telemetryCollection == null) return { total: 0, records: [] };
 
-  const startDate = start ? new Date(start) : new Date(0);
-  const endDate = end ? new Date(end) : new Date();
+  const startDate = start ? deserializeDate(start) : new Date(0);
+  const endDate = end ? deserializeDate(end) : new Date();
 
   const metersToRadians = (m: number) => m / 6378137;
   const query: any = {
