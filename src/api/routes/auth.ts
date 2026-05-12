@@ -2,6 +2,7 @@ import { clearToken, createPasswordHash, issueToken, requireAuth, verifyPassword
 import { createUser, getActiveSuspensionForUserUuid, getUserCount, getUserFromUsername, updateUser } from "../../workers/dbWriter";
 import type { User } from "../../../../common";
 import { handleApiNotFoundRoute } from "./util";
+import { normalizeCountryCode } from "../../lib/country";
 
 type AuthPayload = {
   username?: string;
@@ -42,6 +43,15 @@ async function handleRegister(request: Request) {
     return json({ error: "username already exists" }, 409);
   }
 
+  let country: string | undefined;
+  if (typeof body.country === 'string') {
+    const countryCode = normalizeCountryCode(body.country);
+    if (!countryCode) {
+      return json({ error: "country must be a valid ISO 3166-1 alpha-2 code" }, 400);
+    }
+    country = countryCode;
+  }
+
   const now = new Date();
   const user: User = {
     uuid: crypto.randomUUID(),
@@ -52,7 +62,7 @@ async function handleRegister(request: Request) {
     },
     createdAt: now,
     lastActive: now,
-    country: body.country,
+    country,
   };
 
   await createUser(user);

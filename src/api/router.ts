@@ -5,6 +5,7 @@ import { handleStaffRoute } from "./routes/staff";
 import { handleDevicesRoute } from "./routes/devices";
 import { handleMarketRoute } from "./routes/market";
 import { handleUsersRoute } from "./routes/users";
+import { handleProfileRoute } from "./routes/profile";
 
 export function routeRequest(request: Request) {
   const url = new URL(request.url);
@@ -31,6 +32,10 @@ export function routeRequest(request: Request) {
 
   if (url.pathname.startsWith('/api/market')) {
     return handleMarketRoute(request);
+  }
+
+  if (url.pathname.startsWith('/api/profile/')) {
+    return handleProfileRoute(request);
   }
 
   if (url.pathname.startsWith("/api/users/")) {

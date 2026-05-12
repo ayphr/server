@@ -2,6 +2,7 @@ import { requireAuth } from "../auth";
 import { getTelemetryByLocationAndTime, performPurchaseTransaction } from "../../workers/dbWriter";
 import { getDeviceBySerial } from "../../workers/dbWriter";
 import type { User } from "../../../../common";
+import { OWNER_SHARE, PRICE_PER_RECORD } from "../../constants";
 
 function json(body: unknown, status = 200) {
   return Response.json(body, { status });
@@ -29,9 +30,6 @@ const handlePurchase = requireAuth(async (request: Request, user: User) => {
   const limit = Math.min(500, Number(body.limit ?? 100));
 
   if (!center || typeof center.lat !== 'number' || typeof center.lon !== 'number') return json({ error: 'invalid center' }, 400);
-
-  const PRICE_PER_RECORD = Number(process.env.PRICE_PER_RECORD) || 0.05;
-  const OWNER_SHARE = Number(process.env.OWNER_SHARE) || 0.6;
 
   const { total, records } = await getTelemetryByLocationAndTime({ lat: center.lat, lon: center.lon }, radiusMeters, start, end, limit, 0);
 

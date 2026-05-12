@@ -2,6 +2,7 @@ import { requireAuth, requireRole } from "../auth";
 import { getActiveSuspensionForUserUuid, getUserFromUuid, updateUser } from "../../workers/dbWriter";
 import type { User } from "../../../../common";
 import { handleApiNotFoundRoute } from "./util";
+import { normalizeCountryCode } from "../../lib/country";
 
 function json(body: unknown, status = 200) {
   return Response.json(body, { status });
@@ -19,26 +20,6 @@ const handleMe = requireAuth(async (_request, user) => {
     activeSuspension,
   });
 }, { allowSuspended: true });
-
-const handleMePatch = requireAuth(async (request, user) => {
-  let body: { username?: string; country?: string } | null = null;
-  try {
-    body = await request.json() as { username?: string; country?: string };
-  } catch {
-    body = null;
-  }
-
-  if (typeof body?.username === "string" && body.username.trim()) {
-    user.username = body.username.trim();
-  }
-
-  if (typeof body?.country === "string") {
-    user.country = body.country;
-  }
-
-  await updateUser(user);
-  return json({ user: publicUser(user) });
-});
 
 const handleUserByUuid = requireRole("staff", async (request, user) => {
   const url = new URL(request.url);
@@ -61,10 +42,6 @@ export function handleUsersRoute(request: Request) {
 
   if (request.method === "GET" && url.pathname === "/api/users/me") {
     return handleMe(request);
-  }
-
-  if (request.method === "PATCH" && url.pathname === "/api/users/me") {
-    return handleMePatch(request);
   }
 
   if (request.method === "GET" && url.pathname.startsWith("/api/users/") && url.pathname !== "/api/users/me") {

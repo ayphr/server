@@ -2,6 +2,7 @@ import { Collection, Db, MongoClient, type Document } from 'mongodb';
 import { createLogger } from '../lib/logger';
 import type { TelemetryRecord } from '../lib/telemetry';
 import { deserializeDate, serialiseDevice, serialisePunishment, serialiseUser, unserialiseDevice, unserialisePunishment, unserialiseUser, type Device, type Punishment, type SerialisedDevice, type SerialisedPunishment, type SerialisedUser, type User, type UserRole } from '../../../common';
+import { CREDIT_PER_RECORD } from '../constants';
 
 const log = createLogger('db-worker');
 
@@ -15,6 +16,7 @@ const DEVICES_COLLECTION = 'devices';
 
 let client: MongoClient | null = null;
 let database: Db | null = null;
+let connectPromise: Promise<void> | null = null;
 
 let telemetryCollection: Collection<Document> | null = null;
 let usersCollection: Collection<Document> | null = null;
@@ -99,13 +101,10 @@ async function createCollections() {
       }
     ];
 
-  collectionsToCreate.forEach(async (collection: {
-    name: string;
-    creator: Function;
-  }) => {
+  for (const collection of collectionsToCreate) {
     if (collections.find((mongoCollection: Collection<Document>) => {
       return mongoCollection.collectionName == collection.name
-    })) return;
+    })) continue;
 
     try {
       await collection.creator(database);
@@ -113,23 +112,74 @@ async function createCollections() {
     } catch (error) {
       log.warn({ error, collection: collection.name }, 'could not create collection');
     }
-  });
+  }
+}
+
+async function ensureIndexes() {
+  if (!telemetryCollection || !usersCollection || !punishmentsCollection || !devicesCollection) return;
+
+  try {
+    await telemetryCollection.createIndex({ deviceId: 1 });
+    try {
+      await telemetryCollection.createIndex({ location: '2dsphere' });
+    } catch {
+      // ignore if server doesn't support 2dsphere
+    }
+
+    await usersCollection.createIndex({ uuid: 1 }, { unique: true });
+    await usersCollection.createIndex({ username: 1 }, { unique: true });
+    await usersCollection.createIndex({ 'auth.token': 1 });
+
+    await punishmentsCollection.createIndex({ userUuid: 1 });
+    await punishmentsCollection.createIndex({ type: 1, endsAt: 1, liftedAt: 1 });
+
+    await devicesCollection.createIndex({ serial: 1 }, { unique: true });
+    await devicesCollection.createIndex({ ownerUuid: 1 });
+    try {
+      await devicesCollection.createIndex({ location: '2dsphere' });
+    } catch {
+      // ignore if server doesn't support 2dsphere
+    }
+
+    const purchases = database?.collection('purchases');
+    if (purchases) {
+      await purchases.createIndex({ buyerUuid: 1 });
+      await purchases.createIndex({ createdAt: -1 });
+    }
+  } catch (error) {
+    log.warn({ error }, 'failed to ensure indexes');
+  }
 }
 
 async function connect() {
-  if (client) return;
+  if (database && telemetryCollection && usersCollection && punishmentsCollection && devicesCollection) {
+    return;
+  }
 
-  client = new MongoClient(MONGO_URI);
-  await client.connect();
+  if (!connectPromise) {
+    connectPromise = (async () => {
+      if (!client) {
+        client = new MongoClient(MONGO_URI);
+      }
 
-  database = client.db(DB_NAME);
+      await client.connect();
 
-  await createCollections();
+      database = client.db(DB_NAME);
 
-  telemetryCollection = database.collection(TELEMETRY_COLLECTION);
-  usersCollection = database.collection(USERS_COLLECTION);
-  punishmentsCollection = database.collection(PUNISHMENTS_COLLECTION);
-  devicesCollection = database.collection(DEVICES_COLLECTION);
+      await createCollections();
+
+      telemetryCollection = database.collection(TELEMETRY_COLLECTION);
+      usersCollection = database.collection(USERS_COLLECTION);
+      punishmentsCollection = database.collection(PUNISHMENTS_COLLECTION);
+      devicesCollection = database.collection(DEVICES_COLLECTION);
+
+      await ensureIndexes();
+    })().finally(() => {
+      connectPromise = null;
+    });
+  }
+
+  await connectPromise;
 }
 
 export async function flushRecords(records: TelemetryRecord[], emit: (payload: unknown) => void) {
@@ -151,7 +201,6 @@ export async function flushRecords(records: TelemetryRecord[], emit: (payload: u
     emit({ action: 'log', msg: `inserted ${result.insertedCount} documents` });
     // Award credits to owners: small credit per record
     try {
-      const CREDIT_PER_RECORD = Number(process.env.CREDIT_PER_RECORD) || 0.01;
       const countsByDevice: Record<number, number> = {};
       for (const doc of documents) {
         const id = (doc as any).deviceId as number;
@@ -182,6 +231,7 @@ export async function flushRecords(records: TelemetryRecord[], emit: (payload: u
 }
 
 export async function createUser(user: User) {
+  await connect();
   if (usersCollection == null) return;
 
   await usersCollection.insertOne(serialiseUser(user));
@@ -189,6 +239,7 @@ export async function createUser(user: User) {
 }
 
 export async function getUserFromUuid(uuid: string) {
+  await connect();
   if (usersCollection == null) return;
 
   const doc = await usersCollection.findOne({ uuid });
@@ -198,6 +249,7 @@ export async function getUserFromUuid(uuid: string) {
 }
 
 export async function getUserFromUsername(username: string) {
+  await connect();
   if (usersCollection == null) return;
 
   const doc = await usersCollection.findOne({ username });
@@ -207,6 +259,7 @@ export async function getUserFromUsername(username: string) {
 }
 
 export async function getUserFromToken(token: string) {
+  await connect();
   if (usersCollection == null) return;
 
   const doc = await usersCollection.findOne({ 'auth.token': token });
@@ -216,6 +269,7 @@ export async function getUserFromToken(token: string) {
 }
 
 export async function getUsers() {
+  await connect();
   if (usersCollection == null) return [];
 
   const docs = await usersCollection.find({}).sort({ createdAt: -1 }).toArray();
@@ -223,6 +277,7 @@ export async function getUsers() {
 }
 
 export async function getUsersByRole(role: UserRole) {
+  await connect();
   if (usersCollection == null) return [];
 
   const docs = await usersCollection.find({ role }).sort({ createdAt: -1 }).toArray();
@@ -230,12 +285,14 @@ export async function getUsersByRole(role: UserRole) {
 }
 
 export async function getUserCount() {
+  await connect();
   if (usersCollection == null) return 0;
 
   return usersCollection.countDocuments({});
 }
 
 export async function updateUser(user: User) {
+  await connect();
   if (usersCollection == null) return;
 
   await usersCollection.updateOne({ uuid: user.uuid }, { $set: serialiseUser(user) });
@@ -252,6 +309,7 @@ export async function updateUserRole(userUuid: string, role: UserRole) {
 }
 
 export async function createPunishment(punishment: Punishment) {
+  await connect();
   if (punishmentsCollection == null) return;
 
   await punishmentsCollection.insertOne(serialisePunishment(punishment));
@@ -259,6 +317,7 @@ export async function createPunishment(punishment: Punishment) {
 }
 
 export async function getPunishmentById(id: string) {
+  await connect();
   if (punishmentsCollection == null) return;
 
   const doc = await punishmentsCollection.findOne({ id });
@@ -268,6 +327,7 @@ export async function getPunishmentById(id: string) {
 }
 
 export async function getPunishmentsForUserUuid(userUuid: string) {
+  await connect();
   if (punishmentsCollection == null) return [];
 
   const docs = await punishmentsCollection.find({ userUuid }).sort({ issuedAt: -1 }).toArray();
@@ -275,6 +335,7 @@ export async function getPunishmentsForUserUuid(userUuid: string) {
 }
 
 export async function getActiveSuspensionForUserUuid(userUuid: string) {
+  await connect();
   if (punishmentsCollection == null) return;
 
   const now = new Date().toISOString();
@@ -292,6 +353,7 @@ export async function getActiveSuspensionForUserUuid(userUuid: string) {
 }
 
 export async function getPunishmentsByType(type: Punishment['type']) {
+  await connect();
   if (punishmentsCollection == null) return [];
 
   const docs = await punishmentsCollection.find({ type }).sort({ issuedAt: -1 }).toArray();
@@ -299,6 +361,7 @@ export async function getPunishmentsByType(type: Punishment['type']) {
 }
 
 export async function updatePunishment(punishment: Punishment) {
+  await connect();
   if (punishmentsCollection == null) return;
 
   await punishmentsCollection.updateOne({ id: punishment.id }, { $set: serialisePunishment(punishment) });
@@ -307,6 +370,7 @@ export async function updatePunishment(punishment: Punishment) {
 
 // Devices helpers
 export async function createDevice(device: Device) {
+  await connect();
   if (devicesCollection == null) return;
 
   await devicesCollection.insertOne(serialiseDevice(device));
@@ -314,6 +378,7 @@ export async function createDevice(device: Device) {
 }
 
 export async function getDeviceBySerial(serial: number) {
+  await connect();
   if (devicesCollection == null) return null;
 
   const doc = await devicesCollection.findOne({ serial });
@@ -323,6 +388,7 @@ export async function getDeviceBySerial(serial: number) {
 }
 
 export async function updateDevice(device: Device) {
+  await connect();
   if (devicesCollection == null) return;
 
   await devicesCollection.updateOne({ serial: device.serial }, { $set: serialiseDevice(device) });
@@ -330,6 +396,7 @@ export async function updateDevice(device: Device) {
 }
 
 export async function getDevicesForOwnerUuid(ownerUuid: string) {
+  await connect();
   if (devicesCollection == null) return [];
 
   const docs = await devicesCollection.find({ ownerUuid }).sort({ registeredAt: -1 }).toArray();
@@ -337,12 +404,14 @@ export async function getDevicesForOwnerUuid(ownerUuid: string) {
 }
 
 export async function updateDeviceLastBroadcast(serial: number, when: Date) {
+  await connect();
   if (devicesCollection == null) return;
 
   await devicesCollection.updateOne({ serial }, { $set: { lastBroadcastedAt: when.toISOString() } });
 }
 
 export async function getTelemetryByLocationAndTime(center: { lat: number; lon: number }, radiusMeters: number, start?: Date | string, end?: Date | string, limit = 100, skip = 0) {
+  await connect();
   if (telemetryCollection == null) return { total: 0, records: [] };
 
   const startDate = start ? deserializeDate(start) : new Date(0);
@@ -364,6 +433,7 @@ export async function getTelemetryByLocationAndTime(center: { lat: number; lon: 
 }
 
 export async function chargeUserCredits(userUuid: string, amount: number) {
+  await connect();
   if (usersCollection == null) return false;
   const user = await usersCollection.findOne({ uuid: userUuid });
   if (!user) return false;
@@ -374,6 +444,7 @@ export async function chargeUserCredits(userUuid: string, amount: number) {
 }
 
 export async function awardCreditsBulk(awards: Record<string, number>) {
+  await connect();
   if (usersCollection == null) return;
   for (const [uuid, amount] of Object.entries(awards)) {
     await usersCollection.updateOne({ uuid }, { $inc: { credits: amount } });
