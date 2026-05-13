@@ -1,6 +1,6 @@
-# Caelus Server
+# Ombr Server
 
-Backend service for Caelus, built with TypeScript and Bun.
+Backend service for Ombr, built with TypeScript and Bun.
 
 ## Prerequisites
 

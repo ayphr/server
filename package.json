@@ -1,5 +1,5 @@
 {
-  "name": "caelus-server",
+  "name": "ombr-server",
   "module": "src/index.ts",
   "type": "module",
   "private": true,

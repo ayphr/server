@@ -5,7 +5,7 @@ import { deserializeDate } from '../../../common';
 
 const log = createLogger('redis-buffer');
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
-const REDIS_BUFFER_KEY = process.env.REDIS_BUFFER_KEY || 'caelus:telemetry:buffer';
+const REDIS_BUFFER_KEY = process.env.REDIS_BUFFER_KEY || 'ombr:telemetry:buffer';
 
 const drainScript = `
   local items = redis.call('LRANGE', KEYS[1], 0, -1)

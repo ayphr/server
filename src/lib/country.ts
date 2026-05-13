@@ -3,7 +3,7 @@ export type CountryOption = {
   name: string;
 };
 
-const INVALID_REGION_CODES = new Set(['EZ', 'UN', 'XA', 'XB', 'ZZ']);
+const INVALID_REGION_CODES = new Set(['EZ', 'UN', 'XA', 'XB', 'ZZ', 'DY', 'HV', 'ZR', 'AN', 'EU', 'FX', 'DD', 'BU', 'QO', 'SU', 'CS', 'YU', 'TP', 'UK', 'NH', 'VD', 'YD', 'RH']);
 const REGION_CODE_PATTERN = /^[A-Z]{2}$/;
 const regionDisplayNames = new Intl.DisplayNames(['en'], { type: 'region' });
 
