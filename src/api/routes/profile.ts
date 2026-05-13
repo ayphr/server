@@ -1,11 +1,18 @@
 import type { User } from '../../../../common';
 import { requireAuth } from '../auth';
+import { requireRole } from '../auth';
 import { normalizeCountryCode, getSupportedCountries } from '../../lib/country';
-import { updateUser } from '../../workers/dbWriter';
+import { updateUser, getUserFromUuid } from '../../workers/dbWriter';
 import { handleApiNotFoundRoute } from './util';
 
 type CountryUpdatePayload = {
   country?: string;
+};
+
+type ProfileEditPayload = {
+  country?: string;
+  bio?: string;
+  socialLinks?: Record<string, string | undefined>;
 };
 
 function json(body: unknown, status = 200) {
@@ -48,6 +55,73 @@ const handleCountryUpdate = requireAuth(async (request, user) => {
   return json({ user: publicUser(user) });
 }, { allowSuspended: true });
 
+const handleProfileEdit = requireAuth(async (request, user) => {
+  const url = new URL(request.url);
+  const targetUuid = url.pathname.split('/')[3]; // /api/profile/{uuid}
+
+  if (!targetUuid) {
+    return json({ error: 'invalid user uuid' }, 400);
+  }
+
+  // Check authorization: only owner/staff can edit others, users can only edit themselves
+  const isOwner = user.role === 'owner' || user.role === 'staff';
+  if (targetUuid !== user.uuid && !isOwner) {
+    return json({ error: 'unauthorized' }, 403);
+  }
+
+  // Get the target user
+  const targetUser = await getUserFromUuid(targetUuid);
+  if (!targetUser) {
+    return json({ error: 'user not found' }, 404);
+  }
+
+  let body: ProfileEditPayload | null = null;
+  try {
+    body = await request.json() as ProfileEditPayload;
+  } catch {
+    body = null;
+  }
+
+  if (!body || Object.keys(body).length === 0) {
+    return json({ error: 'no fields to update' }, 400);
+  }
+
+  // Update country if provided
+  if (typeof body.country === 'string') {
+    const countryCode = normalizeCountryCode(body.country);
+    if (!countryCode) {
+      return json({ error: 'country must be a valid ISO 3166-1 alpha-2 code' }, 400);
+    }
+    targetUser.country = countryCode;
+  }
+
+  if (typeof body.bio === 'string') {
+    const bio = body.bio.trim();
+    targetUser.bio = bio.length > 0 ? bio : "Hi! I'm a Ombr user";
+  }
+
+  if (body.socialLinks && typeof body.socialLinks === 'object') {
+    const nextSocialLinks = { ...(targetUser.socialLinks ?? {}) };
+    for (const [key, value] of Object.entries(body.socialLinks)) {
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (trimmed.length > 0) {
+          nextSocialLinks[key as keyof typeof nextSocialLinks] = trimmed;
+        } else {
+          delete nextSocialLinks[key as keyof typeof nextSocialLinks];
+        }
+      } else if (value === undefined || value === null) {
+        delete nextSocialLinks[key as keyof typeof nextSocialLinks];
+      }
+    }
+    targetUser.socialLinks = nextSocialLinks;
+  }
+
+  await updateUser(targetUser);
+
+  return json({ user: publicUser(targetUser) });
+}, { allowSuspended: true });
+
 export function handleProfileRoute(request: Request) {
   const url = new URL(request.url);
 
@@ -61,6 +135,10 @@ export function handleProfileRoute(request: Request) {
 
   if (request.method === 'PATCH' && url.pathname === '/api/profile/country') {
     return handleCountryUpdate(request);
+  }
+
+  if (request.method === 'PATCH' && url.pathname.match(/^\/api\/profile\/[a-f0-9\-]+$/)) {
+    return handleProfileEdit(request);
   }
 
   return handleApiNotFoundRoute();
