@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { requireRole } from "../auth";
-import { createPunishment, getPunishmentById, getPunishmentsByType, getUserCount, getUserFromUsername, getUserFromUuid, getUsers, getUsersByRole, updatePunishment, updateUserRole } from "../../workers/dbWriter";
+import { createPunishment, getPunishmentById, getPunishmentsByType, getUserCount, getUserFromUsername, getUserFromUuid, getUsers, getUsersByRole, updatePunishment, updateUserRole, getActiveSuspensionForUserUuid } from "../../workers/dbWriter";
 import type { Punishment, User, UserRole } from "../../../../common";
 import { handleApiNotFoundRoute } from "./util";
 
@@ -52,21 +52,6 @@ const handleStaffPunishments = requireRole("staff", async (request, staffUser) =
     return json({ punishments });
   }
 
-  if (request.method === "POST" && url.pathname.startsWith("/api/staff/punishments/") && url.pathname.endsWith("/lift")) {
-    const punishmentId = url.pathname.split("/")[4] as string;
-    const punishment = await getPunishmentById(punishmentId);
-    if (!punishment) {
-      return json({ error: "punishment not found" }, 404);
-    }
-
-    punishment.liftedAt = new Date();
-    punishment.liftedByUuid = staffUser.uuid;
-    punishment.liftedByUsername = staffUser.username;
-    await updatePunishment(punishment);
-
-    return json({ punishment });
-  }
-
   if (request.method === "POST") {
     const body = await readJsonBody(request);
     const targetUsername = typeof body?.username === "string" ? body.username : undefined;
@@ -83,12 +68,12 @@ const handleStaffPunishments = requireRole("staff", async (request, staffUser) =
       return json({ error: "target user not found" }, 404);
     }
 
-    if (targetUser.role === "owner") {
-      return json({ error: "owners cannot be suspended" }, 403);
+    if (targetUser.role === "owner" && targetUser.uuid !== staffUser.uuid) {
+      return json({ error: "you cannot suspend other owners" }, 403);
     }
 
-    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
-      return json({ error: "durationMinutes must be a positive number" }, 400);
+    if (!Number.isFinite(durationMinutes) || durationMinutes < -1) {
+      return json({ error: "durationMinutes must be a positive number or -1 for permanent" }, 400);
     }
 
     const now = new Date();
@@ -102,7 +87,7 @@ const handleStaffPunishments = requireRole("staff", async (request, staffUser) =
       issuedByUsername: staffUser.username,
       issuedAt: now,
       startsAt: now,
-      endsAt: new Date(now.getTime() + durationMinutes * 60 * 1000),
+      endsAt: durationMinutes === -1 ? null : new Date(now.getTime() + durationMinutes * 60 * 1000),
     };
 
     await createPunishment(punishment);
@@ -112,6 +97,29 @@ const handleStaffPunishments = requireRole("staff", async (request, staffUser) =
 
   return handleApiNotFoundRoute();
 });
+
+const handleStaffPunishmentLift = requireRole("staff", async (request, staffUser) => {
+  const url = new URL(request.url);
+  const punishmentId = url.pathname.split("/")[4] as string;
+  const punishment = await getPunishmentById(punishmentId);
+  if (!punishment) {
+    return json({ error: "punishment not found" }, 404);
+  }
+
+  if (staffUser.role === "staff" && punishment.userUuid !== staffUser.uuid) {
+    const activeSuspension = await getActiveSuspensionForUserUuid(staffUser.uuid);
+    if (activeSuspension) {
+      return json({ error: "Forbidden" }, 403);
+    }
+  }
+
+  punishment.liftedAt = new Date();
+  punishment.liftedByUuid = staffUser.uuid;
+  punishment.liftedByUsername = staffUser.username;
+  await updatePunishment(punishment);
+
+  return json({ punishment });
+}, { allowSuspended: true });
 
 const handleStaffRoleUpdate = requireRole("owner", async (request) => {
   const url = new URL(request.url);
@@ -165,6 +173,10 @@ export function handleStaffRoute(request: Request) {
 
   if (request.method === "POST" && url.pathname.startsWith("/api/staff/role/")) {
     return handleStaffRoleUpdate(request);
+  }
+
+  if (request.method === "POST" && url.pathname.startsWith("/api/staff/punishments/") && url.pathname.endsWith("/lift")) {
+    return handleStaffPunishmentLift(request);
   }
 
   if ((request.method === "GET" || request.method === "POST") && url.pathname.startsWith("/api/staff/punishments")) {

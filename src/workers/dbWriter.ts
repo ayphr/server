@@ -1,7 +1,7 @@
 import { Collection, Db, MongoClient, type Document } from 'mongodb';
 import { createLogger } from '../lib/logger';
 import type { TelemetryRecord } from '../lib/telemetry';
-import { deserializeDate, serialiseDevice, serialisePunishment, serialiseUser, unserialiseDevice, unserialisePunishment, unserialiseUser, type Device, type Punishment, type SerialisedDevice, type SerialisedPunishment, type SerialisedUser, type User, type UserRole } from '../../../common';
+import { type Device, type Punishment, type User, type UserRole } from '../../../common';
 import { CREDIT_PER_RECORD } from '../constants';
 
 const log = createLogger('db-worker');
@@ -22,6 +22,40 @@ let telemetryCollection: Collection<Document> | null = null;
 let usersCollection: Collection<Document> | null = null;
 let punishmentsCollection: Collection<Document> | null = null;
 let devicesCollection: Collection<Document> | null = null;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value == null || typeof value !== 'object') return false;
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function isIsoDateString(value: string) {
+  const parsed = new Date(value);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString() === value;
+}
+
+function normalizeDateValues<T>(value: T): T {
+  if (value instanceof Date) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    return (isIsoDateString(value) ? new Date(value) : value) as T;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeDateValues(item)) as T;
+  }
+
+  if (!isPlainObject(value)) {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, nestedValue]) => [key, normalizeDateValues(nestedValue)])
+  ) as T;
+}
 
 async function createCollections() {
   if (database == null) return;
@@ -67,7 +101,7 @@ async function createCollections() {
           const collection = await database.createCollection(PUNISHMENTS_COLLECTION);
 
           await collection.createIndex({ userUuid: 1 });
-          await collection.createIndex({ type: 1, endsAt: 1, liftedAt: 1 });
+          await collection.createIndex({ userUuid: 1, type: 1, liftedAt: 1, startsAt: 1, endsAt: 1 });
 
           return collection;
         }
@@ -185,7 +219,7 @@ async function connect() {
 export async function flushRecords(records: TelemetryRecord[], emit: (payload: unknown) => void) {
   try {
     await connect();
-    const documents = records.map((record) => ({ ...record, timestamp: deserializeDate(record.timestamp) }));
+    const documents = records.map((record) => normalizeDateValues(record));
 
     if (documents.length === 0) {
       emit({ action: 'log', msg: 'nothing to insert' });
@@ -234,8 +268,9 @@ export async function createUser(user: User) {
   await connect();
   if (usersCollection == null) return;
 
-  await usersCollection.insertOne(serialiseUser(user));
-  return user;
+  const normalizedUser = normalizeDateValues(user);
+  await usersCollection.insertOne(normalizedUser);
+  return normalizedUser;
 }
 
 export async function getUserFromUuid(uuid: string) {
@@ -245,7 +280,7 @@ export async function getUserFromUuid(uuid: string) {
   const doc = await usersCollection.findOne({ uuid });
   if (!doc) return null;
 
-  return unserialiseUser(doc as unknown as SerialisedUser);
+  return doc as unknown as User;
 }
 
 export async function getUserFromUsername(username: string) {
@@ -255,7 +290,7 @@ export async function getUserFromUsername(username: string) {
   const doc = await usersCollection.findOne({ username });
   if (!doc) return null;
 
-  return unserialiseUser(doc as unknown as SerialisedUser);
+  return doc as unknown as User;
 }
 
 export async function getUserFromToken(token: string) {
@@ -265,7 +300,7 @@ export async function getUserFromToken(token: string) {
   const doc = await usersCollection.findOne({ 'auth.token': token });
   if (!doc) return null;
 
-  return unserialiseUser(doc as unknown as SerialisedUser);
+  return doc as unknown as User;
 }
 
 export async function getUsers() {
@@ -273,7 +308,7 @@ export async function getUsers() {
   if (usersCollection == null) return [];
 
   const docs = await usersCollection.find({}).sort({ createdAt: -1 }).toArray();
-  return docs.map((doc) => unserialiseUser(doc as unknown as SerialisedUser));
+  return docs.map((doc) => doc as unknown as User);
 }
 
 export async function getUsersByRole(role: UserRole) {
@@ -281,7 +316,7 @@ export async function getUsersByRole(role: UserRole) {
   if (usersCollection == null) return [];
 
   const docs = await usersCollection.find({ role }).sort({ createdAt: -1 }).toArray();
-  return docs.map((doc) => unserialiseUser(doc as unknown as SerialisedUser));
+  return docs.map((doc) => doc as unknown as User);
 }
 
 export async function getUserCount() {
@@ -295,8 +330,9 @@ export async function updateUser(user: User) {
   await connect();
   if (usersCollection == null) return;
 
-  await usersCollection.updateOne({ uuid: user.uuid }, { $set: serialiseUser(user) });
-  return user;
+  const normalizedUser = normalizeDateValues(user);
+  await usersCollection.updateOne({ uuid: user.uuid }, { $set: normalizedUser });
+  return normalizedUser;
 }
 
 export async function updateUserRole(userUuid: string, role: UserRole) {
@@ -310,10 +346,12 @@ export async function updateUserRole(userUuid: string, role: UserRole) {
 
 export async function createPunishment(punishment: Punishment) {
   await connect();
-  if (punishmentsCollection == null) return;
 
-  await punishmentsCollection.insertOne(serialisePunishment(punishment));
-  return punishment;
+  if (punishmentsCollection == null) return;
+  const normalizedPunishment = normalizeDateValues(punishment);
+  await punishmentsCollection.insertOne(normalizedPunishment as unknown as Document);
+
+  return normalizedPunishment;
 }
 
 export async function getPunishmentById(id: string) {
@@ -323,7 +361,7 @@ export async function getPunishmentById(id: string) {
   const doc = await punishmentsCollection.findOne({ id });
   if (!doc) return null;
 
-  return unserialisePunishment(doc as unknown as SerialisedPunishment);
+  return doc as unknown as Punishment;
 }
 
 export async function getPunishmentsForUserUuid(userUuid: string) {
@@ -331,14 +369,14 @@ export async function getPunishmentsForUserUuid(userUuid: string) {
   if (punishmentsCollection == null) return [];
 
   const docs = await punishmentsCollection.find({ userUuid }).sort({ issuedAt: -1 }).toArray();
-  return docs.map((doc) => unserialisePunishment(doc as unknown as SerialisedPunishment));
+  return docs.map((doc) => doc as unknown as Punishment);
 }
 
 export async function getActiveSuspensionForUserUuid(userUuid: string) {
   await connect();
   if (punishmentsCollection == null) return;
 
-  const now = new Date().toISOString();
+  const now = new Date();
   const doc = await punishmentsCollection.findOne({
     userUuid,
     type: 'suspension',
@@ -349,7 +387,7 @@ export async function getActiveSuspensionForUserUuid(userUuid: string) {
 
   if (!doc) return null;
 
-  return unserialisePunishment(doc as unknown as SerialisedPunishment);
+  return doc as unknown as Punishment;
 }
 
 export async function getPunishmentsByType(type: Punishment['type']) {
@@ -357,24 +395,25 @@ export async function getPunishmentsByType(type: Punishment['type']) {
   if (punishmentsCollection == null) return [];
 
   const docs = await punishmentsCollection.find({ type }).sort({ issuedAt: -1 }).toArray();
-  return docs.map((doc) => unserialisePunishment(doc as unknown as SerialisedPunishment));
+  return docs.map((doc) => doc as unknown as Punishment);
 }
 
 export async function updatePunishment(punishment: Punishment) {
   await connect();
   if (punishmentsCollection == null) return;
 
-  await punishmentsCollection.updateOne({ id: punishment.id }, { $set: serialisePunishment(punishment) });
-  return punishment;
+  const normalizedPunishment = normalizeDateValues(punishment);
+  await punishmentsCollection.updateOne({ id: punishment.id }, { $set: normalizedPunishment as unknown as Document });
+  return normalizedPunishment;
 }
 
-// Devices helpers
 export async function createDevice(device: Device) {
   await connect();
   if (devicesCollection == null) return;
 
-  await devicesCollection.insertOne(serialiseDevice(device));
-  return device;
+  const normalizedDevice = normalizeDateValues(device);
+  await devicesCollection.insertOne(normalizedDevice);
+  return normalizedDevice;
 }
 
 export async function getDeviceBySerial(serial: number) {
@@ -384,15 +423,16 @@ export async function getDeviceBySerial(serial: number) {
   const doc = await devicesCollection.findOne({ serial });
   if (!doc) return null;
 
-  return unserialiseDevice(doc as unknown as SerialisedDevice);
+  return doc as unknown as Device;
 }
 
 export async function updateDevice(device: Device) {
   await connect();
   if (devicesCollection == null) return;
 
-  await devicesCollection.updateOne({ serial: device.serial }, { $set: serialiseDevice(device) });
-  return device;
+  const normalizedDevice = normalizeDateValues(device);
+  await devicesCollection.updateOne({ serial: device.serial }, { $set: normalizedDevice });
+  return normalizedDevice;
 }
 
 export async function getDevicesForOwnerUuid(ownerUuid: string) {
@@ -400,22 +440,22 @@ export async function getDevicesForOwnerUuid(ownerUuid: string) {
   if (devicesCollection == null) return [];
 
   const docs = await devicesCollection.find({ ownerUuid }).sort({ registeredAt: -1 }).toArray();
-  return docs.map((doc) => unserialiseDevice(doc as unknown as SerialisedDevice));
+  return docs.map((doc) => doc as unknown as Device);
 }
 
 export async function updateDeviceLastBroadcast(serial: number, when: Date) {
   await connect();
   if (devicesCollection == null) return;
 
-  await devicesCollection.updateOne({ serial }, { $set: { lastBroadcastedAt: when.toISOString() } });
+  await devicesCollection.updateOne({ serial }, { $set: { lastBroadcastedAt: when } });
 }
 
-export async function getTelemetryByLocationAndTime(center: { lat: number; lon: number }, radiusMeters: number, start?: Date | string, end?: Date | string, limit = 100, skip = 0) {
+export async function getTelemetryByLocationAndTime(center: { lat: number; lon: number }, radiusMeters: number, start?: Date, end?: Date, limit = 100, skip = 0) {
   await connect();
   if (telemetryCollection == null) return { total: 0, records: [] };
 
-  const startDate = start ? deserializeDate(start) : new Date(0);
-  const endDate = end ? deserializeDate(end) : new Date();
+  const startDate = start ?? new Date(0);
+  const endDate = end ?? new Date();
 
   const metersToRadians = (m: number) => m / 6378137;
   const query: any = {

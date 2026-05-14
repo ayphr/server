@@ -14,8 +14,14 @@ function publicUser(user: User) {
 
 const handleMe = requireAuth(async (_request, user) => {
   const punishments = await getPunishmentsForUserUuid(user.uuid);
+  const now = Date.now();
   const activeSuspension = punishments.find((punishment) => {
-    return punishment.type === "suspension" && !punishment.liftedAt && new Date(punishment.endsAt).getTime() > Date.now();
+    return (
+      punishment.type === "suspension" &&
+      !punishment.liftedAt &&
+      new Date(punishment.startsAt).getTime() <= now &&
+      new Date(punishment.endsAt).getTime() > now
+    );
   }) ?? null;
 
   return json({

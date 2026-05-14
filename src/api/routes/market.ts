@@ -25,8 +25,8 @@ const handlePurchase = requireAuth(async (request: Request, user: User) => {
 
   const center = body.center;
   const radiusMeters = Number(body.radiusMeters ?? 1000);
-  const start = body.start;
-  const end = body.end;
+  const start = body.start ? new Date(body.start) : undefined;
+  const end = body.end ? new Date(body.end) : undefined;
   const limit = Math.min(500, Number(body.limit ?? 100));
 
   if (!center || typeof center.lat !== 'number' || typeof center.lon !== 'number') return json({ error: 'invalid center' }, 400);

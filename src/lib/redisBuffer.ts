@@ -1,7 +1,6 @@
 import { createClient, type RedisClientType } from 'redis';
 import { createLogger } from './logger';
 import type { TelemetryRecord } from './telemetry';
-import { deserializeDate } from '../../../common';
 
 const log = createLogger('redis-buffer');
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
@@ -36,25 +35,18 @@ async function getClient() {
   return connectPromise;
 }
 
-function normalizeRecord(record: TelemetryRecord) {
-  return {
-    ...record,
-    timestamp: record.timestamp instanceof Date ? record.timestamp.toISOString() : deserializeDate(record.timestamp).toISOString()
-  };
-}
-
 function parseRecord(payload: string): TelemetryRecord {
   const record = JSON.parse(payload) as Omit<TelemetryRecord, 'timestamp'> & { timestamp: string };
   return {
     ...record,
-    timestamp: deserializeDate(record.timestamp)
+    timestamp: new Date(record.timestamp),
   };
 }
 
 export async function enqueueTelemetryRecord(record: TelemetryRecord) {
   try {
     const redis = await getClient();
-    await redis.rPush(REDIS_BUFFER_KEY, JSON.stringify(normalizeRecord(record)));
+    await redis.rPush(REDIS_BUFFER_KEY, JSON.stringify(record));
   } catch (error) {
     log.error({ error }, 'failed to enqueue telemetry record');
   }

@@ -1,8 +1,7 @@
 import { requireAuth, requireRole } from "../auth";
-import { getActiveSuspensionForUserUuid, getUserFromUuid, updateUser } from "../../workers/dbWriter";
+import { getActiveSuspensionForUserUuid, getUserFromUuid } from "../../workers/dbWriter";
 import type { User } from "../../../../common";
 import { handleApiNotFoundRoute } from "./util";
-import { normalizeCountryCode } from "../../lib/country";
 
 function json(body: unknown, status = 200) {
   return Response.json(body, { status });
@@ -21,7 +20,7 @@ const handleMe = requireAuth(async (_request, user) => {
   });
 }, { allowSuspended: true });
 
-const handleUserByUuid = requireRole("staff", async (request, user) => {
+const handleUserByUuid = requireAuth(async (request, user) => {
   const url = new URL(request.url);
   const targetUuid = url.pathname.split("/")[3];
 
@@ -35,7 +34,7 @@ const handleUserByUuid = requireRole("staff", async (request, user) => {
   }
 
   return json({ user: publicUser(targetUser), requestedBy: publicUser(user) });
-}, { allowSuspended: false });
+}, { allowSuspended: true });
 
 export function handleUsersRoute(request: Request) {
   const url = new URL(request.url);
