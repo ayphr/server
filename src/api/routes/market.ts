@@ -1,14 +1,13 @@
 import { requireAuth } from "../auth";
-import { getTelemetryByLocationAndTime, performPurchaseTransaction } from "../../workers/dbWriter";
-import { getDeviceBySerial } from "../../workers/dbWriter";
-import type { User } from "../../../../common";
+import { getTelemetryByLocationAndTime, performPurchaseTransaction, getDeviceBySerial } from "../../workers/dbWriter";
+import type { User } from "../../../common";
 import { OWNER_SHARE, PRICE_PER_RECORD } from "../../constants";
 
 function json(body: unknown, status = 200) {
   return Response.json(body, { status });
 }
 
-async function readJsonBody(request: Request): Promise<any | null> {
+async function readJsonBody(request: Request): Promise<any> {
   if (!request.headers.get("content-type")?.includes("application/json")) return null;
   try {
     return await request.json();
@@ -60,7 +59,7 @@ export function handleMarketRoute(request: Request) {
   const url = new URL(request.url);
 
   if (request.method === 'POST' && url.pathname === '/api/market/purchase') {
-    return handlePurchase(request as unknown as Request);
+    return handlePurchase(request);
   }
 
   return Response.json({ error: 'not found' }, { status: 404 });

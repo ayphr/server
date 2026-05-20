@@ -1,5 +1,5 @@
-import net from 'net';
-import { Worker, type WorkerOptions } from 'worker_threads';
+import net from 'node:net';
+import { Worker, type WorkerOptions } from 'node:worker_threads';
 import { createLogger } from './lib/logger';
 import { closeTelemetryBuffer, drainTelemetryBuffer, enqueueTelemetryRecord } from './lib/redisBuffer';
 import { appendChunk, parseIncomingBuffer } from './lib/socketFraming';

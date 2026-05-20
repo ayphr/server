@@ -1,6 +1,6 @@
 import { requireAuth } from "../auth";
 import { getPunishmentById, getPunishmentsForUserUuid } from "../../workers/dbWriter";
-import type { User } from "../../../../common";
+import type { User } from "../../../common";
 import { handleApiNotFoundRoute } from "./util";
 
 function json(body: unknown, status = 200) {
@@ -20,7 +20,7 @@ const handleMe = requireAuth(async (_request, user) => {
       punishment.type === "suspension" &&
       !punishment.liftedAt &&
       new Date(punishment.startsAt).getTime() <= now &&
-      new Date(punishment.endsAt).getTime() > now
+      punishment.endsAt ? new Date(punishment.endsAt).getTime() > now : null
     );
   }) ?? null;
 

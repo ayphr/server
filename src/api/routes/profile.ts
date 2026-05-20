@@ -1,6 +1,5 @@
-import type { User } from '../../../../common';
+import type { User } from '../../../common';
 import { requireAuth } from '../auth';
-import { requireRole } from '../auth';
 import { normalizeCountryCode, getSupportedCountries } from '../../lib/country';
 import { updateUser, getUserFromUuid } from '../../workers/dbWriter';
 import { handleApiNotFoundRoute } from './util';

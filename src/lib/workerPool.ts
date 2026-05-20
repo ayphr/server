@@ -1,5 +1,5 @@
-import { Worker } from 'worker_threads';
-import type { WorkerOptions } from 'worker_threads';
+import { Worker } from 'node:worker_threads';
+import type { WorkerOptions } from 'node:worker_threads';
 
 export function createWorkerPool(workerCount: number, workerUrl: URL, onRecord: (record: unknown) => void) {
   const workers: Worker[] = [];

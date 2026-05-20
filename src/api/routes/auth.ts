@@ -1,6 +1,6 @@
 import { clearToken, createPasswordHash, issueToken, requireAuth, verifyPassword } from "../auth";
-import { createUser, getActiveSuspensionForUserUuid, getUserCount, getUserFromUsername, updateUser } from "../../workers/dbWriter";
-import type { User } from "../../../../common";
+import { createUser, getActiveSuspensionForUserUuid, getUserFromUsername, updateUser } from "../../workers/dbWriter";
+import type { User } from "../../../common";
 import { handleApiNotFoundRoute } from "./util";
 import { normalizeCountryCode } from "../../lib/country";
 

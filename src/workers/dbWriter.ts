@@ -1,7 +1,7 @@
 import { Collection, Db, MongoClient, type Document } from 'mongodb';
 import { createLogger } from '../lib/logger';
 import type { TelemetryRecord } from '../lib/telemetry';
-import { type Device, type Punishment, type User, type UserRole } from '../../../common';
+import { type Device, type Punishment, type User, type UserRole } from '../../common';
 import { CREDIT_PER_RECORD } from '../constants';
 
 const log = createLogger('db-worker');
@@ -78,7 +78,7 @@ async function createCollections() {
           try {
             await col.createIndex({ location: '2dsphere' });
           } catch (e) {
-            // ignore if not supported
+            // ignore if server doesn't support 2dsphere
           }
         }
       },
@@ -136,7 +136,7 @@ async function createCollections() {
     ];
 
   for (const collection of collectionsToCreate) {
-    if (collections.find((mongoCollection: Collection<Document>) => {
+    if (collections.some((mongoCollection: Collection<Document>) => {
       return mongoCollection.collectionName == collection.name
     })) continue;
 
@@ -190,11 +190,8 @@ async function connect() {
     return;
   }
 
-  if (!connectPromise) {
-    connectPromise = (async () => {
-      if (!client) {
-        client = new MongoClient(MONGO_URI);
-      }
+  connectPromise ??= (async () => {
+      client ??= new MongoClient(MONGO_URI);
 
       await client.connect();
 
@@ -211,7 +208,6 @@ async function connect() {
     })().finally(() => {
       connectPromise = null;
     });
-  }
 
   await connectPromise;
 }
@@ -349,7 +345,7 @@ export async function createPunishment(punishment: Punishment) {
 
   if (punishmentsCollection == null) return;
   const normalizedPunishment = normalizeDateValues(punishment);
-  await punishmentsCollection.insertOne(normalizedPunishment as unknown as Document);
+  await punishmentsCollection.insertOne(normalizedPunishment);
 
   return normalizedPunishment;
 }

@@ -1,13 +1,13 @@
 import { requireAuth } from "../auth";
 import { createDevice, getDeviceBySerial, getDevicesForOwnerUuid } from "../../workers/dbWriter";
-import type { Device, User } from "../../../../common";
+import type { Device, User } from "../../../common";
 import { handleApiNotFoundRoute } from "./util";
 
 function json(body: unknown, status = 200) {
   return Response.json(body, { status });
 }
 
-async function readJsonBody(request: Request): Promise<any | null> {
+async function readJsonBody(request: Request): Promise<any> {
   if (!request.headers.get("content-type")?.includes("application/json")) return null;
   try {
     return await request.json();
@@ -30,8 +30,8 @@ const handleRegister = requireAuth(async (request, user: User) => {
   // location: { lat, lon }
   let location: Device['location'] | null = null;
   if (body?.location && typeof body.location === 'object') {
-    const lat = Number((body.location as any).lat);
-    const lon = Number((body.location as any).lon);
+    const lat = Number(body.location.lat);
+    const lon = Number(body.location.lon);
     if (Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
       location = { type: 'Point', coordinates: [lon, lat] };
     } else {

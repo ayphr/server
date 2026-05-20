@@ -1,4 +1,4 @@
-import { parentPort } from 'worker_threads';
+import { parentPort } from 'node:worker_threads';
 import { createLogger } from './lib/logger';
 import { handlePacketMessage } from './workers/packetProcessor';
 
@@ -7,7 +7,7 @@ const log = createLogger('packet-worker-entry');
 if (!parentPort) throw new Error('worker must be run as worker thread');
 
 parentPort.on('message', (message) => {
-  handlePacketMessage(message as any, (payload) => parentPort!.postMessage(payload));
+  handlePacketMessage(message, (payload) => parentPort!.postMessage(payload));
 });
 
 parentPort.on('error', (error) => {

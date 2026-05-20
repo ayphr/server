@@ -1,6 +1,6 @@
-import { requireAuth, requireRole } from "../auth";
+import { requireAuth } from "../auth";
 import { getActiveSuspensionForUserUuid, getUserFromUuid } from "../../workers/dbWriter";
-import type { User } from "../../../../common";
+import type { User } from "../../../common";
 import { handleApiNotFoundRoute } from "./util";
 
 function json(body: unknown, status = 200) {

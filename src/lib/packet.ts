@@ -122,7 +122,7 @@ export function unpack(raw: Uint8Array): (SensorPacket & { valid: boolean }) | n
   const serial = Number((tel >> 95n) & 0xffffffffn);
 
   return {
-    type: type as PacketType,
+    type,
     temperature,
     humidity,
     airPressure,

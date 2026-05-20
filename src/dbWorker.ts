@@ -1,4 +1,4 @@
-import { parentPort } from 'worker_threads';
+import { parentPort } from 'node:worker_threads';
 import { createLogger } from './lib/logger';
 import { flushRecords } from './workers/dbWriter';
 
@@ -7,7 +7,7 @@ const log = createLogger('db-worker-entry');
 if (!parentPort) throw new Error('db worker must be run as worker thread');
 
 parentPort.on('message', async (message) => {
-  if (!message || message.action !== 'flush' || !Array.isArray(message.records)) return;
+  if (message?.action !== 'flush' || !Array.isArray(message.records)) return;
   await flushRecords(message.records, (payload) => parentPort!.postMessage(payload));
 });
 

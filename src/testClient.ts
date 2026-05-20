@@ -1,4 +1,4 @@
-import net from 'net';
+import net from 'node:net';
 import { pack } from './lib/packet';
 import { createLogger } from './lib/logger';
 

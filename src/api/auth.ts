@@ -1,5 +1,5 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import type { User, UserRole } from "../../../common";
+import type { User, UserRole } from "../../common";
 import { getActiveSuspensionForUserUuid, getUserFromToken, updateUser } from "../workers/dbWriter";
 
 export const TOKEN_EXPIRE_DURATION_SECONDS = 48 * 60 * 60; // 48 hours
@@ -74,7 +74,7 @@ export function verifyToken(user: User, token: string): TokenVerificationResult 
   if (!user.auth.issuedAt || !user.auth.token) return "invalid";
 
   const tokenExpiresAt = getExpiryDate(user.auth.issuedAt);
-  if (new Date().getTime() > tokenExpiresAt.getTime()) {
+  if (Date.now() > tokenExpiresAt.getTime()) {
     return "expired";
   }
 
@@ -118,7 +118,7 @@ const roleRank: Record<UserRole, number> = {
 };
 
 export function hasRoleAtLeast(userRole: UserRole, minimumRole: UserRole) {
-  return roleRank[userRole] >= roleRank[minimumRole];
+  return (roleRank[userRole] || 0) >= (roleRank[minimumRole] || 0);
 }
 
 export function requireAuth(handler: AuthenticatedHandler, options: AuthGuardOptions = {}) {
