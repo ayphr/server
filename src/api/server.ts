@@ -29,7 +29,7 @@ export function setupServer(port: number, callback: Function): Server<undefined>
     port,
 
     fetch(request) {
-      return addCorsHeaders(routeRequest(normalizeRequest(request)));
+      return addCorsHeaders(routeRequest(normalizeRequest(request)), request);
     },
   });
 

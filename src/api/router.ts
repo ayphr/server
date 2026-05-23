@@ -11,11 +11,11 @@ export function routeRequest(request: Request) {
   const url = new URL(request.url);
 
   if (request.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
-    return handleOptionsRoute();
+    return handleOptionsRoute(request);
   }
 
   if (request.method === "GET" && url.pathname === "/api/status") {
-    return handleStatusRoute();
+    return handleStatusRoute(request);
   }
 
   if (url.pathname.startsWith("/api/auth/")) {
@@ -47,8 +47,8 @@ export function routeRequest(request: Request) {
   }
 
   if (url.pathname.startsWith("/api/")) {
-    return handleApiNotFoundRoute();
+    return handleApiNotFoundRoute(request);
   }
 
-  return handleNotFoundRoute();
+  return handleNotFoundRoute(request);
 }
