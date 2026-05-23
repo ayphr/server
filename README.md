@@ -1,5 +1,7 @@
 # Ombr Server
 
+[![CodeQL Advanced](https://github.com/ombr-gh/server/actions/workflows/codeql.yml/badge.svg)](https://github.com/ombr-gh/server/actions/workflows/codeql.yml)
+
 Backend service for Ombr, built with TypeScript and Bun.
 
 ## Prerequisites
