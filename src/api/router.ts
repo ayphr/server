@@ -1,5 +1,5 @@
 import { handleAuthRoute } from "./routes/auth";
-import { handleApiNotFoundRoute, handleNotFoundRoute, handleStatusRoute } from "./routes/util";
+import { handleApiNotFoundRoute, handleNotFoundRoute, handleOptionsRoute, handleStatusRoute } from "./routes/util";
 import { handlePunishmentsRoute } from "./routes/punishments";
 import { handleStaffRoute } from "./routes/staff";
 import { handleDevicesRoute } from "./routes/devices";
@@ -9,6 +9,10 @@ import { handleProfileRoute } from "./routes/profile";
 
 export function routeRequest(request: Request) {
   const url = new URL(request.url);
+
+  if (request.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
+    return handleOptionsRoute();
+  }
 
   if (request.method === "GET" && url.pathname === "/api/status") {
     return handleStatusRoute();
