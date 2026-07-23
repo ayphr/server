@@ -1,5 +1,7 @@
 # Ayphr Server
 
+[![CodeQL Advanced](https://github.com/ayphr/server/actions/workflows/codeql.yml/badge.svg)](https://github.com/ayphr/server/actions/workflows/codeql.yml)
+
 Backend service for Ayphr, built with TypeScript and Bun.
 
 ## Prerequisites
