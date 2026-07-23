@@ -7,7 +7,7 @@ import { CREDIT_PER_RECORD } from '../constants';
 const log = createLogger('db-worker');
 
 const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
-const DB_NAME = process.env.MONGO_DB || 'ombr';
+const DB_NAME = process.env.MONGO_DB || 'ayphr';
 
 const TELEMETRY_COLLECTION = 'telemetry';
 const USERS_COLLECTION = 'users';
@@ -191,23 +191,23 @@ async function connect() {
   }
 
   connectPromise ??= (async () => {
-      client ??= new MongoClient(MONGO_URI);
+    client ??= new MongoClient(MONGO_URI);
 
-      await client.connect();
+    await client.connect();
 
-      database = client.db(DB_NAME);
+    database = client.db(DB_NAME);
 
-      await createCollections();
+    await createCollections();
 
-      telemetryCollection = database.collection(TELEMETRY_COLLECTION);
-      usersCollection = database.collection(USERS_COLLECTION);
-      punishmentsCollection = database.collection(PUNISHMENTS_COLLECTION);
-      devicesCollection = database.collection(DEVICES_COLLECTION);
+    telemetryCollection = database.collection(TELEMETRY_COLLECTION);
+    usersCollection = database.collection(USERS_COLLECTION);
+    punishmentsCollection = database.collection(PUNISHMENTS_COLLECTION);
+    devicesCollection = database.collection(DEVICES_COLLECTION);
 
-      await ensureIndexes();
-    })().finally(() => {
-      connectPromise = null;
-    });
+    await ensureIndexes();
+  })().finally(() => {
+    connectPromise = null;
+  });
 
   await connectPromise;
 }

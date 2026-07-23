@@ -96,7 +96,7 @@ const handleProfileEdit = requireAuth(async (request, user) => {
 
   if (typeof body.bio === 'string') {
     const bio = body.bio.trim();
-    targetUser.bio = bio.length > 0 ? bio : "Hi! I'm a Ombr user";
+    targetUser.bio = bio.length > 0 ? bio : "Hi! I'm a Ayphr user";
   }
 
   if (body.socialLinks && typeof body.socialLinks === 'object') {

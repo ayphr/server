@@ -57,7 +57,7 @@ async function handleRegister(request: Request) {
     uuid: crypto.randomUUID(),
     username: body.username,
     role: "user",
-    bio: "Hi! I'm a Ombr user",
+    bio: "Hi! I'm a Ayphr user",
     socialLinks: {},
     auth: {
       passwordHash: createPasswordHash(body.password),

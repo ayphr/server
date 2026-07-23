@@ -18,7 +18,7 @@ export type SensorPacket = {
   humidity: number;
 
   /**
-   * Air pressure in hectopascals, from 300 to 1100 hPa
+   * Air pressure in hectopascals, from 300 to 1100 hPa with 1 hPa precision
    */
   airPressure: number;
 

@@ -1,6 +1,6 @@
-# Ombr Server
+# Ayphr Server
 
-Backend service for Ombr, built with TypeScript and Bun.
+Backend service for Ayphr, built with TypeScript and Bun.
 
 ## Prerequisites
 
